@@ -1,0 +1,1365 @@
+<html lang="en" xmlns="http://www.w3.org/1999/html">
+<head>
+    <script type="text/javascript" src="js/dygraph-2.2.1.min.js"></script>
+    <script type="text/javascript" src="js/dygraph-synchronizer.js"></script>
+    <script src="js/split-1.6.0.min.js"></script>
+    <script src="js/http-endpoint.js"></script>
+    <script src="js/connections.js"></script>
+    <script src="js/data.js"></script>
+    <link rel="icon" href="img/st-icon-s.png"/>
+    <link rel="stylesheet" type="text/css" href="css/dygraph-2.2.1.css"/>
+</head>
+<title>CupLogger</title>
+<style>
+    ::-webkit-scrollbar {
+        -webkit-appearance: none;
+        width: 7px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        border-radius: 4px;
+        background-color: rgba(0, 0, 0, .5);
+        -webkit-box-shadow: 0 0 1px rgba(255, 255, 255, .5);
+    }
+
+    :root {
+        --color1: #8A2B2B;
+        --color2: #463333;
+        --color3: #C47535;
+        --color3alpha01: rgba(196, 117, 53, 0.1);
+        --color4: #E0AF63;
+        --color4alpha01: rgba(224, 175, 99, 0.1);
+    }
+
+    body {
+        padding: 0;
+        margin: 0;
+        font-family: Arial, sans-serif;
+        font-size: 90%;
+    }
+
+    input::placeholder {
+        color: grey;
+        font-size: 95%;
+    }
+
+    select[multiple]:focus option:checked {
+        background: var(--color4) linear-gradient(0deg, var(--color4) 0%, var(--color4) 100%);
+    }
+    select option:checked {
+        background-color: var(--color4)
+    }
+
+    .centered {
+        display: flex;
+        justify-content: center; /* Align horizontally */
+        align-items: center; /* Align vertically */
+    }
+
+    .centered-top {
+        display: flex;
+        justify-content: center; /* Align horizontally */
+        align-items: start; /* Align vertically */
+    }
+
+    .lefted {
+        display: flex;
+        justify-content: left; /* Align horizontally */
+        align-items: center; /* Align vertically */
+    }
+
+    .righted {
+        display: flex;
+        justify-content: right; /* Align horizontally */
+        align-items: center; /* Align vertically */
+    }
+
+    .flex-container-h {
+        display: flex;
+        justify-content: flex-start;
+    }
+
+    .flex-container-v {
+        display: flex;
+        justify-content: flex-start;
+        flex-direction: column;
+    }
+
+    /* Tooltip */
+    .help-icon {
+        position: absolute;
+        bottom: 0;
+        left: 6px;
+        cursor: pointer;
+    }
+
+    .tooltip {
+        display: none;
+        position: absolute;
+        bottom: 30px;
+        left: 10px;
+        background-color: white;
+        border: 1px solid #dcdcdc;
+        padding: 5px;
+        border-radius: 4px;
+    }
+
+    /* Split */
+    .gutter {
+        background-color: var(--color4alpha01);
+        background-repeat: no-repeat;
+        background-position: 50%;
+    }
+
+    .gutter.gutter-horizontal {
+        background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAeCAYAAADkftS9AAAAIklEQVQoU2M4c+bMfxAGAgYYmwGrIIiDjrELjpo5aiZeMwF+yNnOs5KSvgAAAABJRU5ErkJggg==');
+        cursor: col-resize;
+    }
+
+    /* Data Selector */
+    .select-time-interval {
+        font-size: 85%;
+    }
+
+    .data-select-panel {
+        padding: 4px 4px 14px 4px;
+        background-color: #fff;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        overflow-y: auto;
+    }
+
+    .data-select-grid {
+        width: 100%;
+        height: 44px;
+        display: flex;
+        justify-content: flex-start;
+    }
+
+    .data-select-cell {
+        /*outline: solid 1px black;*/
+    }
+
+    .data-select-cell-device {
+        flex: 0 0 200px;
+        text-align: center;
+        font-size: 90%;
+    }
+
+    .data-select-cell-data {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .data-select-cell-manage {
+        flex: 0 0 60px;
+        text-align: center;
+        font-size: 90%;
+    }
+
+    .log-output {
+        margin: 0;
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+        background-color: var(--color2);
+        color: #fff;
+        overflow-y: scroll; /* Always show vertical scrollbar */
+        white-space: pre-wrap;
+    }
+
+</style>
+<body>
+<script type="text/javascript">
+    /* General utils */
+    const DAY_IN_MS = 86400000;
+    const HOUR_IN_MS = 3600000;
+    const MIN_IN_MS = 60000;
+
+    function showHideDiv(divId, showCallback, hideCallback) {
+        let div = document.getElementById(divId);
+        if (div.style.display !== 'none') {
+            div.style.display = 'none';
+            hideCallback();
+        } else {
+            div.style.display = '';
+            showCallback();
+        }
+    }
+
+    function isUserAtBottom(container) {
+        const threshold = 5; // Pixels from the bottom
+        return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+    }
+
+    function scrollToBotton(container) {
+        container.scrollTop = container.scrollHeight;
+    }
+
+    function debounceAndThrottle(func, wait, immediate = false) {
+        let timeout;
+        let lastInvocation = 0;
+
+        return function executedFunction(...args) {
+            const context = this;
+            const now = Date.now();
+
+            const throttler = () => {
+                lastInvocation = now;
+                timeout = null;
+                if (!immediate) func.apply(context, args);
+            };
+
+            const shouldCallImmediately = immediate && !timeout;
+            clearTimeout(timeout);
+            if (shouldCallImmediately) {
+                func.apply(context, args);
+            }
+
+            if (now - lastInvocation > wait) {
+                throttler();
+            } else {
+                timeout = setTimeout(throttler, wait - (now - lastInvocation));
+            }
+        };
+    }
+
+    function showHideElem(elemId) {
+        var elem = document.getElementById(elemId);
+        elem.style.display = elem.style.display === "block" ? "none" : "block";
+    }
+
+    function zeropad(x) {
+        return (x < 10) ? '0' + x : x;
+    }
+
+    function zeropadTwo(x) {
+        return (x < 10) ? '00' + x : (x < 100 ? '0' + x : x);
+    }
+
+    function formatToTimeMs(ms) {
+        var d = new Date(ms);
+        return zeropad(d.getHours()) + ":" +
+            zeropad(d.getMinutes()) + ":" +
+            zeropad(d.getSeconds()) + "." +
+            zeropadTwo(d.getMilliseconds());
+    }
+
+    function formatToDateTimeMs(ms) {
+        var d = new Date(ms);
+        return d.getFullYear() + "-" +
+            zeropad(d.getMonth() + 1) + "-" +
+            zeropad(d.getDay()) + " " +
+            zeropad(d.getHours()) + ":" +
+            zeropad(d.getMinutes()) + ":" +
+            zeropad(d.getSeconds()) + "." +
+            zeropadTwo(d.getMilliseconds());
+    }
+
+    // ignores html tags
+    function highlight(html, substring, appendAtStart, appendAtEnd) {
+        const lowerSubstring = substring.toLowerCase();
+        let result = '';
+        let lastIndex = 0;
+        let isInsideTag = false;
+
+        for (let i = 0; i < html.length; i++) {
+            // Check for tag start
+            if (html[i] === '<') {
+                isInsideTag = true;
+                // Append everything up to this point
+                result += html.slice(lastIndex, i);
+                lastIndex = i;
+            }
+            // Check for tag end
+            else if (html[i] === '>') {
+                isInsideTag = false;
+                // Append the tag itself
+                result += html.slice(lastIndex, i + 1);
+                lastIndex = i + 1;
+            }
+            // Process text content outside of tags
+            else if (!isInsideTag) {
+                // Find the substring outside of HTML tags
+                const end = i + lowerSubstring.length;
+                if (end <= html.length && html.substring(i, end).toLowerCase() === lowerSubstring) {
+                    // Append everything up to the start of the match
+                    result += html.slice(lastIndex, i);
+                    // Append the highlighted match
+                    result += appendAtStart + html.slice(i, end) + appendAtEnd;
+                    // Update the index and lastIndex
+                    i = end - 1;
+                    lastIndex = end;
+                }
+            }
+        }
+
+        // Append any remaining part of the string
+        result += html.slice(lastIndex);
+
+        return result;
+    }
+</script>
+<script type="text/javascript">
+    /* Hacking div resize handler */
+    var hackDivResizeId;
+    var hackDivResizeHeight;
+    var hackDivResizeCallback;
+
+    function hackDivResizeMouseDown(elem, callback) {
+        hackDivResizeId = elem.id;
+        hackDivResizeHeight = elem.style.height;
+        hackDivResizeCallback = callback;
+    }
+
+    window.onmousemove = function () {
+        if (hackDivResizeId !== undefined) {
+            let div = document.getElementById(hackDivResizeId);
+            if (div.style.height !== hackDivResizeHeight) {
+                hackDivResizeCallback();
+            }
+        }
+    };
+
+    window.onmouseup = function () {
+        hackDivResizeId = undefined;
+        hackDivResizeHeight = undefined;
+        hackDivResizeCallback = undefined;
+    }
+</script>
+<div class="flex-container-h" style="height: 24px; color: #fff; background-color: var(--color1);">
+    <div class="lefted">
+        &nbsp;<img style="margin: 0; padding: 0; height: 12px; border-radius: 0" src="img/st-icon-s-white.png">
+        <b>&nbsp;CupLogger</b>
+    </div>
+    <div class="centered" style="flex: 1; font-size: 90%">
+        <span id="data_stats_span" style="color:lightgray ;font-size: 80%; ; padding-top: 4px"></span>&nbsp;
+    </div>
+    <div class="righted" style="font-size: 90%">
+        &nbsp;<a href="https://github.com/sensortea/CupLogger" style="color: white">Help</a>&nbsp;
+        &nbsp;<a href="https://github.com/sensortea/CupLogger#support" style="color: white">Support</a>&nbsp;
+        &nbsp;<a href="https://github.com/sensortea/CupLogger" style="color: white">About</a>&nbsp;
+        &nbsp;<a href="https://github.com/sensortea/CupLogger"><img style="margin: 0; padding: 0; height: 14px; border-radius: 0" src="img/github-mark-white.png"></a>&nbsp
+    </div>
+</div>
+<div class="data-select-panel">
+    <div class="flex-container-h" style="margin-top: 0">
+        <div class="lefted">
+            <input type="text" id="device_filter_input" placeholder="Filter devices..." oninput="showHideConnections()"/>
+        </div>
+        <div class="righted" style="flex: 1">
+            <span style="font-size: 90%">From&nbsp;</span>
+            <input type="datetime-local" id="startTimeInput" step="60" value="" style="font-size: 90%" oninput="timeInputsChanged()"/>&nbsp;
+            <span style="font-size: 90%">&nbsp;to&nbsp;</span>
+            <input type="datetime-local" id="endTimeInput" step="60" value="" style="font-size: 90%" oninput="timeInputsChanged()"/>&nbsp;
+            <span style="font-size: 90%">&nbsp;&nbsp;Jump to last&nbsp;</span>
+            <input type="button" value="1/10 min" onclick="loadLastInterval(10 * MIN_IN_MS, MIN_IN_MS)" class="select-time-interval"/>&nbsp;
+            <input type="button" value="10/60 min" onclick="loadLastInterval(HOUR_IN_MS, 10 * MIN_IN_MS)" class="select-time-interval"/>&nbsp;
+            <input type="button" value="1/6 hours" onclick="loadLastInterval(6 * HOUR_IN_MS, HOUR_IN_MS)" class="select-time-interval"/>&nbsp;
+            <input type="button" value="6/24 hours" onclick="loadLastInterval(DAY_IN_MS, 6 * HOUR_IN_MS)" class="select-time-interval"/>&nbsp;
+            <input type="button" value="1/7 days" onclick="loadLastInterval(7 * DAY_IN_MS, DAY_IN_MS)" class="select-time-interval"/>&nbsp;
+            <input type="button" value="7/30 days" onclick="loadLastInterval(30 * DAY_IN_MS, 7 * DAY_IN_MS)" class="select-time-interval"/>&nbsp;
+            <span style="font-size: 90%">Refresh&nbsp;</span>
+            <input type="checkbox" checked id="auto_refresh_checkbox"/>
+        </div>
+    </div>
+    <div id="connectionsList" style="margin-top: 8px; overflow-y: auto">
+    </div>
+    <div style="margin-right: 8px;">
+        <div class="data-select-grid" style="height: 34px; margin-top: 8px">
+            <div class="data-select-cell data-select-cell-device"></div>
+            <div id="combinedTimeselector" class="data-select-cell data-select-cell-data"></div>
+            <div class="data-select-cell data-select-cell-manage centered">
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="text/javascript">
+    /* graph ploting utils */
+    const readingsGraphColors = [
+        "#1e90ff", "#f08080", "#2f4f4f", "#2e8b57",
+        "#ff00ff", "#87cefa", "#00ffff", "#191970",
+        "#ff1493", "#0000ff", "#7f0000", "#ffff54",
+        "#ff4500", "#ffe4b5", "#ba55d3", "#00fa9a",
+        "#ffa500", "#dda0dd", "#808000", "#00ff00"
+    ]
+
+    // Dygraph doesn't set value ranges for x and y/y2 axes when it's moved/panned, etc. This will set them using,
+    function fixValueRangesUpdate(graph) {
+        let xAxisRange = graph.xAxisRange();
+        let yAxisRanges = graph.yAxisRanges();
+
+        var axesOptions = {};
+        axesOptions.y = {valueRange: yAxisRanges[0]};
+        if (yAxisRanges.length > 1) {
+            axesOptions.y2 = {valueRange: yAxisRanges[1]};
+        }
+        let gOptions = {dateWindow: xAxisRange, axes: axesOptions};
+        graph.updateOptions(gOptions);
+    }
+
+    // Plotters
+    // from view-source:https://dygraphs.com/tests/plotters.html
+    // Modified from barChartPlotter
+    function updatePlotter(e) {
+        var ctx = e.drawingContext;
+        var points = e.points;
+        var y_bottom = e.dygraph.toDomYCoord(0);
+
+        ctx.fillStyle = e.color;// darkenColor(e.color);
+
+        // Find the minimum separation between x-values.
+        // This determines the bar width.
+        var min_sep = Infinity;
+        for (var i = 1; i < points.length; i++) {
+            var sep = points[i].canvasx - points[i - 1].canvasx;
+            if (sep < min_sep) min_sep = sep;
+        }
+        var bar_width = 1; //min_sep;//Math.floor(2.0 / 3 * min_sep);
+
+        // Do the actual plotting.
+        for (var i = 0; i < points.length; i++) {
+            var p = points[i];
+            if(isNaN(p.y)) {
+                continue;
+            }
+            var center_x = p.canvasx;
+
+            ctx.fillRect(center_x - bar_width / 2, 0,
+                bar_width, y_bottom * 2);
+
+            ctx.strokeRect(center_x - bar_width / 2, 0,
+                bar_width, y_bottom * 2);
+        }
+    }
+</script>
+
+<script type="text/javascript">
+    /* Graphs management */
+    // all graphs, {graphKey: {graph: Dygraph, data: []}
+    var graphMap = {};
+
+    refreshables = {};
+
+    function resizeGraph(graphKey) {
+        graphMap[graphKey].graph.resize();
+    }
+
+    /* Graphs selected time sync */
+    var graphSync;
+
+    function desynchronizeAllGraphs() {
+        if (graphSync !== undefined && graphSync !== null) {
+            graphSync.detach();
+            graphSync = null;
+        }
+    }
+    function synchronizeAllGraphs() {
+        desynchronizeAllGraphs();
+        let graphs = [];
+        for (const [, value] of Object.entries(graphMap)) {
+            graphs.push(value.graph);
+        }
+        graphSync = Dygraph.synchronize(graphs, {
+            range: false,
+            selection: true,
+        });
+    }
+</script>
+<script type="text/javascript">
+    /* Loaded data management */
+    let now;
+    let timelineWindowStartEpochMs;
+    let timelineWindowEndEpochMs;
+    let selectedTimelineWindow;
+
+    function toDateTimeLocal(epochMs) {
+        let date = new Date(epochMs);
+        var shifted = (date.valueOf() - date.getTimezoneOffset()*60000);
+        return Math.floor(shifted / 60000) * 60000; // rounding to minute
+    }
+
+    function fromDateTimeLocal(epochMs) {
+        let date = new Date(epochMs);
+        return (date.valueOf() + date.getTimezoneOffset()*60000);
+    }
+
+    function timeInputsChanged() {
+        var startEpochMs = fromDateTimeLocal(document.getElementById("startTimeInput").valueAsNumber);
+        var endEpochMs = fromDateTimeLocal(document.getElementById("endTimeInput").valueAsNumber);
+        if (startEpochMs > endEpochMs) {
+            endEpochMs = startEpochMs + HOUR_IN_MS;
+        }
+        loadInterval(startEpochMs, endEpochMs, startEpochMs, endEpochMs);
+    }
+
+    function updateTimeInputs() {
+        document.getElementById("startTimeInput").valueAsNumber = toDateTimeLocal(timelineWindowStartEpochMs);
+        document.getElementById("endTimeInput").valueAsNumber = toDateTimeLocal(timelineWindowEndEpochMs);
+    }
+
+    // todo: change of last interval to show resets view completely. Instead, maybe refresh data loaded only?
+    function loadLastInterval(loadIntervalMs, selectIntervalMs) {
+        now = Date.now();
+        loadInterval(now - loadIntervalMs, now, now - selectIntervalMs, now);
+    }
+
+    // todo: this is hack, fix it properly
+    let disableUpdateSelectedTimelineWindow = false;
+
+    function loadInterval(startEpochMs, endEpochMs, selectStartEpochMs, selectEndEpochMs) {
+        // interval should be less than 8 hours, and endEpochMs should be within a minute of current time
+        var autoRefreshEnabled = (Math.abs(endEpochMs - startEpochMs) < 8 * HOUR_IN_MS) &&
+                                    (Math.abs(endEpochMs - Date.now()) < MIN_IN_MS);
+        document.getElementById("auto_refresh_checkbox").disabled = !autoRefreshEnabled;
+
+        timelineWindowStartEpochMs = startEpochMs;
+        timelineWindowEndEpochMs = endEpochMs;
+        disableUpdateSelectedTimelineWindow = true;
+        selectedTimelineWindow = [selectStartEpochMs, selectEndEpochMs];
+        updateTimeInputs();
+        // todo: leaky
+        lastKnownConnections = [];
+        // todo: this is hack to cleanup some resources. do better job when doing better diffing
+        graphMap = {};
+        logMap = {};
+        refreshables = {};
+        desynchronizeAllGraphs();
+
+        pollSerialConnections();
+        disableUpdateSelectedTimelineWindow = false;
+    }
+
+    // todo: this feels like a hack: review if it's still needed when we don't rebuild the whole page on connection's attributes change
+    function updateSelectedTimelineWindow(range) {
+        if (!disableUpdateSelectedTimelineWindow) {
+            selectedTimelineWindow = range;
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        loadLastInterval(HOUR_IN_MS, 10 * MIN_IN_MS, true);
+        // Start polling the API every second
+        setInterval(pollSerialConnections, 500);
+    });
+
+    // Store the last known state of the connections
+    let lastKnownConnections = [];
+
+    // todo: use async await, move to connections.js
+    function pollSerialConnections() {
+        fetch(httpEndpoint + '/listSerialConnections', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+            .then(response => response.json())
+            .then(newConnections => {
+                if (newConnections.length === 0) {
+                    const listContainer = document.getElementById('connectionsList');
+                    listContainer.innerHTML = `
+                        <div class="flex-container-h" style="height: 40px">
+                            <div class="centered" style="flex:1">
+                               <span style="color:#555;"><b>No USB Serial connections detected yet.</b></span><!--TODO: include troubleshoot link-->
+                            </div>
+                        </div>`;
+                }
+
+                var connectionListChanged = false;
+                if (newConnections.length === lastKnownConnections.length) {
+                    for (var i = 0; i < newConnections.length; i++) {
+                        if (newConnections[i].serialNumber !== lastKnownConnections[i].serialNumber) {
+                            connectionListChanged = true;
+                            break;
+                        }
+                    }
+                }  else {
+                    connectionListChanged = true;
+                }
+
+                if (connectionListChanged) {
+                    // rebuilding whole page if list of connections changed
+                    // todo: this is hack to cleanup some resources. do better job when doing better diffing
+                    graphMap = {};
+                    logMap = {};
+                    refreshables = {};
+                    if (graphSync !== undefined && graphSync !== null) {
+                        graphSync.detach();
+                        graphSync = null;
+                    }
+                    updateConnectionsList(newConnections);
+                } else if (JSON.stringify(newConnections) !== JSON.stringify(lastKnownConnections)) {
+                    // updating connections status/info
+                    for (var i = 0; i < newConnections.length; i++) {
+                        sn = newConnections[i].serialNumber;
+                        document.getElementById("name-input-" + sn).value = newConnections[i].name;
+                        document.getElementById("baud-rate-input-" + sn).value = newConnections[i].baudRate;
+                        document.getElementById("data-capture-" + sn).checked = newConnections[i].dataCaptureOn;
+                        document.getElementById("connection_status-" + sn).innerHTML =
+                            buildConnectionStatusElem(newConnections[i].connected, newConnections[i].dataCaptureOn);
+                    }
+                }
+                lastKnownConnections = newConnections;
+
+                // todo: this is hack. we should update fresh data independently when not whole page is rebuilt at data change
+                updateFreshDataInLastInterval();
+            })
+            .catch(error => {
+                const listContainer = document.getElementById('connectionsList');
+                listContainer.innerHTML = `
+                    <div class="flex-container-h" style="height: 40px">
+                        <div class="centered" style="flex:1">
+                            <span style="color: red;"><b>Couldn't fetch data from the server at ${httpEndpoint}. Is it running?</b></span>
+                        </div>
+                    </div>`;
+                console.error('Error:', error);
+            });
+    }
+
+    function updateFreshDataInLastInterval() {
+        let autoRefreshElem = document.getElementById("auto_refresh_checkbox");
+        if (autoRefreshElem.disabled || !autoRefreshElem.checked) {
+            return;
+        }
+        var prevNow = timelineWindowEndEpochMs;
+        now = Date.now();
+        // Note: timelineWindowStartEpochMs remains the same
+        // Note: selectedTimelineWindow is updated during combined timeline refresh
+        timelineWindowEndEpochMs = now;
+        updateTimeInputs();
+        // todo: do we also want to move forward start of the window and let beginning be removed from charts?
+        for (const [, refreshable] of Object.entries(refreshables)) {
+            refreshable.refresh(prevNow, now);
+        }
+        if (Math.abs(selectedTimelineWindow[1] - prevNow) < 30 * 1000) {
+            selectedTimelineWindow = [selectedTimelineWindow[0] + (now - selectedTimelineWindow[1]), now];
+        }
+    }
+
+</script>
+<script type="text/javascript">
+    /* Connection's data availability (timeline) */
+    // todo: can't we just do query across all sns here? that might be simpler code...
+    function computeCombinedGDataAvailability(currTimelineGDatas) {
+        var newCombinedGDataAvail = []
+        // all are of same length and have all data points;
+        //     except that some are slower to add new fresh data...
+        //     so in current implementation we show only where we loaded for all; todo: do better
+        var minLength = Number.POSITIVE_INFINITY;
+        for (t = 0; t < currTimelineGDatas.length; t++) {
+            if (minLength > currTimelineGDatas[t].length) {
+                minLength = currTimelineGDatas[t].length;
+            }
+        }
+        // note: we are ignoring (hence -1) last "artificial" edge data point
+        for (i = 0; i < minLength - 1; i++) {
+            var curVal = NaN;
+            for (t = 0; t < currTimelineGDatas.length; t++) {
+                var val = currTimelineGDatas[t][i][1];
+                curVal = (isNaN(curVal) || curVal < val) ? val : curVal;
+            }
+            let epochMs = currTimelineGDatas[0][i][0];
+            newCombinedGDataAvail.push([epochMs, curVal]);
+        }
+        // adding "artificial" edge data points, so that full timeline for all is shown
+        newCombinedGDataAvail = [[timelineWindowStartEpochMs, 0]].concat(newCombinedGDataAvail);
+        newCombinedGDataAvail.push([timelineWindowEndEpochMs + 1, 0]);
+        return newCombinedGDataAvail;
+    }
+
+    function filterOutConnection(connection) {
+        const connectionFilterText = document.getElementById('device_filter_input').value.toLowerCase();
+        if (connectionFilterText === "") {
+            return false;
+        }
+
+        return !(connection.name.toLowerCase().includes(connectionFilterText) ||
+            connection.serialNumber.toLowerCase().includes(connectionFilterText));
+    }
+
+    function showHideConnections() {
+        lastKnownConnections.forEach(conn => {
+            let sn = conn.serialNumber;
+            if (filterOutConnection(conn)) {
+                document.getElementById("connection-div-" + sn).style.display = 'none';
+            } else {
+                document.getElementById("connection-div-" + sn).style.display = '';
+            }
+        });
+    }
+
+    function updateDataStats() {
+        let fetchedBytes = 0;
+        let loadedEvents = 0;
+
+        for (const [sn, snData] of Object.entries(data)) {
+            fetchedBytes += snData.fetchedBytes;
+            loadedEvents += snData.data.length;
+        }
+        document.getElementById("data_stats_span").innerHTML = "fetched bytes: " + fetchedBytes.toLocaleString() + ", loaded events: " + loadedEvents.toLocaleString();
+    }
+
+    function buildConnectionStatusElem(connected, dataCaptureOn) {
+        var status = !connected ? '' : '<img style="width: 14px; height: 14px" src="img/usb-connected-icon.png"/>';
+        if (connected && dataCaptureOn) {
+            status = '<img style="width: 14px; height: 14px" src="img/flashing.gif"/>';
+        }
+        return status;
+    }
+
+    async function updateConnectionsList(data) {
+        const listContainer = document.getElementById('connectionsList');
+        // Clear the current list
+        listContainer.innerHTML = '';
+        let timelineGDatas = [];
+        let timelineGraphsKeys = [];
+        for (const item of data) {
+            let sn = item.serialNumber;
+            var status = buildConnectionStatusElem(item.connected, item.dataCaptureOn);
+
+            const connectionElement = document.createElement('div');
+            let hide = filterOutConnection(item);
+            connectionElement.innerHTML = `
+            <div id="connection-div-${sn}" style="border-bottom: var(--color1) solid 1px">
+                <div class="data-select-grid" id="deviceDataAvail-${sn}" style="${hide ? 'display: none;' : ''}">
+                    <div class="data-select-cell data-select-cell-device centered-top">
+                            <div class="flex-container-v" style="width: 100%;">
+                                <div style="flex: 0 0 18px; font-size: 90%; color: #888888">
+                                    <div class="flex-container-h" style="width: 100%; margin-bottom: 4px">
+                                        <div class="lefted">
+                                            <input type="text" id="name-input-${sn}"
+                                                   value="${item.name}"
+                                                   onchange="setSerialConnectionName('${sn}', document.getElementById('name-input-${sn}').value);"
+                                                   style="font-weight: bold; width:166px; height: 20px; border: #999 solid 0px; ${item.connected ? '' : ''}"/>
+                                        </div>
+                                        <div class="righted" style="flex: 1; margin-right: 2px">
+                                            <span id="connection_status-${sn}">${status}</span>
+                                            <input type="checkbox" id="data-capture-${sn}" title="Capture data"
+                                                   ${item.dataCaptureOn ? "checked" : ""}
+                                                   onchange="setSerialConnectionDataCapture('${sn}', document.getElementById('data-capture-${sn}').checked)"
+                                                   style="display: inline-block; width: 14px; margin-right: 0px"/><br/>
+                                        </div>
+                                    </div>
+                                    <div class="flex-container-h" style="width: 100%">
+                                        <div class="lefted">
+                                            <span style="font-size: 90%; max-width: 140px">&nbsp;${sn}</span>
+                                        </div>
+                                        <div class="righted" style="flex: 1; margin-right: 2px">
+                                            <input type="text" id="baud-rate-input-${sn}"
+                                                   value="${item.baudRate}"
+                                                   onchange="setSerialConnectionBaudRate('${sn}', document.getElementById('baud-rate-input-${sn}').value);"
+                                                   style="font-size: 90%; width:42px; height: 14px"/>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                    </div>
+                    <div id="dataselector-${sn}" class="data-select-cell data-select-cell-data"></div>
+                    <div class="data-select-cell data-select-cell-manage centered-top" style="padding-top: 12px">
+                        <input type="button" style="margin-left: 2px" value="..." title="Add new plot from data selection"
+                        onclick="
+                        showHideDiv('data-select-details-${sn}',
+                                                    function () {expandConnectionData('${sn}', 'connectionTimelineG-${sn}', 'deviceDataAvail-${sn}')},
+                                                    function () {collapseConnectionData('${sn}', 'connectionTimelineG-${sn}', 'deviceDataAvail-${sn}')})">
+                    </div>
+                </div>
+                <div id="data-select-details-${sn}" class="flex-container-h"
+                     style="display: none; height: 280px; min-height: 280px; padding: 4px; padding-bottom: 8px; margin-bottom: 4px; margin-top: 10px;
+                     background-color: #fff;
+                     resize: vertical; overflow: auto" onmousedown="hackDivResizeMouseDown(this, function () {resizeGraph('readings_data_plot-${sn}')})">
+                </div>
+            </div>`
+
+            listContainer.appendChild(connectionElement);
+
+            // "activate" graphs
+            // todo: deal with no data properly
+            await loadData(sn, timelineWindowStartEpochMs, timelineWindowEndEpochMs);
+            updateDataStats();
+            let timelineGData = getTimeline(sn, timelineWindowStartEpochMs, timelineWindowEndEpochMs);
+
+            timelineGDatas.push(timelineGData);
+
+            var connectionTimelineG = new Dygraph(
+                document.getElementById("dataselector-" + sn),
+                timelineGData,
+                {
+                    labels: ["Date", "Data", "Update"],
+                    legend: "never",
+                    dateWindow: selectedTimelineWindow,
+                    axes: {
+                        x: {
+                            ticker: Dygraph.dateTicker,
+                            axisLabelFormatter: Dygraph.dateAxisLabelFormatter,
+                            drawGrid: true,
+                            drawAxis: false,
+                            axisLabelFontSize: 12,
+                        },
+                        y: {
+                            drawGrid: false,
+                            drawAxis: false,
+                        }
+                    },
+                    series: {
+                        "Data": {
+                            color: "rgba(196, 117, 53, 0.1)",
+                            colorAlpha: 0.3,
+                            fillGraph: true,
+                            fillAlpha: 0.3,
+                            stepPlot: true,
+                            pointSize: 0,
+                            showInRangeSelector: true,
+                        },
+                        "Update": {
+                            color: "var(--color1)",
+                            plotter: updatePlotter,
+                            showInRangeSelector: true,
+                        },
+                    },
+                    showRangeSelector: false,
+                    rangeSelectorPlotFillColor: "#C47535",
+                    rangeSelectorPlotFillGradientColor: "#C47535",
+                    rangeSelectorPlotStrokeColor: "#fff",
+                    rangeSelectorPlotLineWidth: "1",
+                    rangeSelectorHeight: 12,
+                }
+            );
+            let gId = 'connectionTimelineG-' + sn;
+            timelineGraphsKeys.push(gId);
+            let graphEntry = {graph: connectionTimelineG, data: timelineGData};
+            graphMap[gId] = graphEntry;
+
+            // todo: seems like quite a bit of duplicate code with other refreshables
+            refreshables[gId] = {
+                refresh: async function (prevNow, now) {
+                    await loadAndAppendData(sn, prevNow, now);
+                    updateDataStats();
+                    let refreshedData = getTimeline(sn, timelineWindowStartEpochMs, now);
+                    let gOptions = {file: refreshedData};
+                    // update visible area of plot, if graph dateWindow was aligned to the right (within 30sec accuracy)
+                    var axisRange = graphEntry.graph.xAxisRange();
+                    if (Math.abs(axisRange[1] - prevNow) < 30 * 1000) {
+                        gOptions.dateWindow = [axisRange[0] + (now - axisRange[1]), now];
+                    }
+                    graphEntry.graph.updateOptions(gOptions);
+                    graphEntry.data = refreshedData;
+                }
+            }
+
+        }
+
+        var combinedGDataAvail = computeCombinedGDataAvailability(timelineGDatas);
+
+        var combinedTimeSelectorG = new Dygraph(
+            document.getElementById("combinedTimeselector"),
+            combinedGDataAvail,
+            {
+                labels: ["Date", "Value"],
+                legend: "never",
+                stepPlot: true,
+                dateWindow: selectedTimelineWindow,
+                axes: {
+                    x: {
+                        ticker: Dygraph.dateTicker,
+                        axisLabelFormatter: Dygraph.dateAxisLabelFormatter,
+                        drawGrid: true,
+                        drawAxis: true,
+                        axisLabelFontSize: 12,
+                    },
+                    y: {
+                        drawGrid: false,
+                        drawAxis: false,
+                        axisLabelFontSize: 12,
+                    }
+                },
+                showRangeSelector: true,
+                rangeSelectorPlotFillColor: "#C47535",
+                rangeSelectorPlotFillGradientColor: "#C47535",
+                rangeSelectorPlotStrokeColor: "#fff",
+                rangeSelectorPlotLineWidth: "1",
+                rangeSelectorHeight: 12,
+            }
+        );
+
+        let cgId = 'combinedTimeSelectorG';
+        let cgraphEntry = {graph: combinedTimeSelectorG, data: combinedGDataAvail};
+        graphMap[cgId] = cgraphEntry;
+
+        refreshables[cgId] = {
+            refresh: async function (prevNow, now) {
+                // todo: this looks intense, but we only needed to add new datapoints since prevNow...
+                var currTimelineGDatas = [];
+                timelineGraphsKeys.forEach(gkey => {
+                    currTimelineGDatas.push(graphMap[gkey].data);
+                })
+
+                // todo: quite a bit of code duplication with the above
+                var newCombinedGDataAvail = computeCombinedGDataAvailability(currTimelineGDatas);
+
+                let gOptions = {file: newCombinedGDataAvail};
+                // update visible area of plot,
+                // but only if graph dateWindow was aligned to right (within 30sec accuracy)
+                var axisRange = cgraphEntry.graph.xAxisRange();
+                let diff = axisRange[1] - prevNow;
+                // update visible area of plot, if graph dateWindow was aligned to the right (within 30sec accuracy)
+                if (Math.abs(diff) < 30 * 1000) {
+                    let updatedDateWindow = [axisRange[0] + (now - axisRange[1]), now];
+                    gOptions.dateWindow = updatedDateWindow;
+                    // todo: is this hack needed?
+                    updateSelectedTimelineWindow(updatedDateWindow);
+                }
+
+                cgraphEntry.graph.updateOptions(gOptions)
+                cgraphEntry.data = newCombinedGDataAvail;
+            }
+        }
+
+        synchronizeAllGraphs();
+    }
+</script>
+<script type="text/javascript">
+    /* Connection's detailed data */
+
+    // todo: cleanup same as graphMap
+    // {data: , showing interval}
+    let logMap = {}
+
+    function syntaxHighlightTime(str) {
+        return '<span style="color: aquamarine">' + str + '</span>';
+    }
+
+    function syntaxHighlightLog(str) {
+        return '<span style="color: khaki">' + str + '</span>';
+    }
+
+    function syntaxHighlightReadingName(str) {
+        return '<span style="color: aqua">' + str + '</span>';
+    }
+
+    function syntaxHighlightReadingValue(str) {
+        return '<span style="color: springgreen">' + str + '</span>';
+    }
+
+    // TODO: optimize: this is on hot path
+    function updateDisplayedLogInterval(sn) {
+        var start = Date.now();
+        const logContainer = document.getElementById('data-select-details-log-container-' + sn);
+        var userAtBottom = isUserAtBottom(logContainer);
+
+        if (logMap[sn] === undefined) {
+            logMap[sn] = {};
+        }
+        var displayedInterval =  logMap[sn].displayedInterval;
+        let minDate = selectedTimelineWindow[0];
+        let maxDate = selectedTimelineWindow[1];
+        const textType = document.querySelector('input[name="text_output_what_radio-' + sn + '"]:checked').value;
+        const printTime = document.querySelector('input[name="text_output_time_radio-' + sn + '"]:checked').value;
+        const textFilter = document.getElementById('text_output_filter_input-' + sn).value.toLowerCase();
+        if (displayedInterval !== undefined &&
+            displayedInterval.startEpochMs === minDate && displayedInterval.endEpochMs === maxDate &&
+            displayedInterval.endEpochMs < (Date.now() + MIN_IN_MS) && // NOTE: we want to keep updating if user panned graphs to future to show fresh data ;)
+            textType === displayedInterval.textType &&
+            printTime === displayedInterval.printTime && textFilter === displayedInterval.textFilter) {
+            // console.log("Requested interval with current config is already displayed.");
+            return;
+        }
+
+        var logHtml = "";
+        // todo: only do diff, don't rebuild all!
+
+        let timePrefixFunc;
+        if (printTime === 'epochms') {
+            timePrefixFunc = function (epochMs) { return syntaxHighlightTime(epochMs) + ","};
+        } else if (printTime === "datetime") {
+            timePrefixFunc = function (epochMs) { return syntaxHighlightTime(formatToDateTimeMs(epochMs)) + ","};
+        } else if (printTime === "time") {
+            timePrefixFunc = function (epochMs) { return syntaxHighlightTime(formatToTimeMs(epochMs)) + ","};
+        } else {
+            timePrefixFunc = function (epochMs) { return ""};
+        }
+
+        function printText(epochMs, text) {
+            let line = timePrefixFunc(epochMs) + text;
+            if (!textFilter || line.toLowerCase().replace(/<[^>]*>/g, '').includes(textFilter)) {
+                logHtml += line + '<br>';
+            }
+        }
+
+        function printLogs(epochMs, rawText, event) {
+            if (event === undefined || !event.logMessage) {
+                return;
+            }
+            printText(epochMs, syntaxHighlightLog(event.logMessage));
+        }
+
+        function printReadings(epochMs, rawText, event) {
+            if (event === undefined) {
+                return;
+            }
+            for (var i = 0; i < event.readingIds.length; i++) {
+                printText(epochMs, syntaxHighlightReadingName(event.readingIds[i]) + "," + syntaxHighlightReadingValue(event.readingValues[i]));
+            }
+        }
+
+        let prevEvent;
+        function printUpdates(epochMs, rawText, event) {
+            if (event === undefined) {
+                return;
+            }
+            if (prevEvent === undefined ||
+                prevEvent.programId !== event.programId ||
+                prevEvent.programVersion !== event.programVersion ||
+                prevEvent.deviceConfig !== event.deviceConfig) {
+                printText(epochMs, event.programId + "," + event.programVersion + "," + event.deviceConfig);
+            }
+            prevEvent = event;
+        }
+
+        function printRaw(epochMs, rawText, event) {
+            if (rawText !== undefined) {
+                printText(epochMs, rawText);
+            } else {
+                /*
+                   Constructing back from parsed event using format:
+                        - text format: <epochMs>,<programId>,<programVersion>,<deviceConfig>,
+                       <timeDelta>,<logMessage>[,<readingName>,<readingValue>[,<readingName>,<readingValue>[...]]
+                 */
+                let text =
+                    event.programId + "," +
+                    event.programVersion + "," +
+                    event.deviceConfig + "," +
+                    event.timeDelta + "," +
+                    syntaxHighlightLog(event.logMessage);
+                for (var i = 0; i < event.readingIds.length; i++) {
+                    text += "," + syntaxHighlightReadingName(event.readingIds[i]) + ":" + syntaxHighlightReadingValue(event.readingValues[i]);
+                }
+                printText(epochMs, text);
+            }
+        }
+
+        let printFunc;
+        if (textType === "logs") {
+            printFunc = printLogs;
+        } else if (textType === "readings") {
+            printFunc = printReadings;
+        } else if (textType === "updates") {
+            printFunc = printUpdates;
+        } else if (textType === "raw") {
+            printFunc = printRaw;
+        }
+
+        scanLoadedData(sn, minDate, maxDate, function (epochMs, rawText, event) {
+            printFunc(epochMs, rawText, event);
+        });
+
+        if (textFilter) {
+            logHtml = highlight(logHtml, textFilter, '<span style="background-color:var(--color3);"><b>', '</b></span>')
+        }
+        logContainer.innerHTML = logHtml;
+
+        // Auto-scroll only if user is at the bottom
+        if (userAtBottom) {
+            scrollToBotton(logContainer);
+        }
+
+        logMap[sn].displayedInterval = {startEpochMs: minDate, endEpochMs: maxDate,
+            textType: textType, printTime: printTime, textFilter: textFilter};
+
+        // console.log("Updated logs in " + (Date.now() - start) + ", " + minDate + "-" + maxDate);
+    }
+
+    function showHideReadings(sn) {
+        var filterInput = document.getElementById('readings_filter_input-' + sn);
+        var multiSelect = document.getElementById('readings_data_plot_selected_readings-' + sn);
+
+        var filterValue = filterInput.value.toLowerCase();
+        var options = multiSelect.options;
+
+        for (var i = 0; i < options.length; i++) {
+            var option = options[i];
+            var optionText = option.text.toLowerCase();
+            if (optionText.includes(filterValue)) {
+                option.style.display = "";
+            } else {
+                option.style.display = "none";
+            }
+        }
+    }
+
+    async function expandConnectionData(sn, timelineGraphKey, divId) {
+        // expand timeline
+        document.getElementById(divId).style.height = 66 + 12;
+        let div = document.getElementById(divId);
+        // div.style.height = 200;
+
+        var timelineGraph = graphMap[timelineGraphKey].graph;
+        timelineGraph.updateOptions({
+            axes: {x: {drawAxis: true}},
+            showRangeSelector: true
+        });
+        timelineGraph.resize();
+
+        // readings
+        // todo: maybe don't need to pass in start/end? OR BETTER: pass in _selected_ start end!
+        // todo: update when new readings are found in new data..
+        var readings = getReadings(sn, timelineWindowStartEpochMs, timelineWindowEndEpochMs);
+        let readingOptions = "";
+        readings.forEach(reading => readingOptions += `<option value="${reading}">${reading}</option>`);
+
+        let panelDiv = document.getElementById("data-select-details-" + sn);
+        panelDiv.innerHTML =
+            `<div id="data-select-details-plot-${sn}" style=" min-width: 0;">
+                <div class="flex-container-h" style="height: 100%;">
+                    <div style="flex: 0 0 144px;">
+                        <div>
+                            <input type="text" id="readings_filter_input-${sn}" placeholder="Filter readings..."
+                                   style="width: 144px; border: #ccc solid 0px; border-bottom: #ccc solid 1px"
+                                   oninput="showHideReadings('${sn}')"/>
+                        </div>
+                        <div>
+                            <select id="readings_data_plot_selected_readings-${sn}" multiple style="width: 144px; height: calc(100% - 18px); border: 0"
+                                    onchange="readingsSelectionChanged('${sn}')">
+                                ${readingOptions}
+                            </select>
+                        </div>
+                    </div>
+                    <div style="flex:1; min-width: 0; height: 100%">
+                        <div style="position: relative">
+                            <div id="readings_data_plot-${sn}"
+                                 style="height: 100%; background-color: white; margin-left: 4px"></div>
+                            <span class="help-icon" onclick="showHideElem('graph-help-${sn}')" style="font-size: 60%; color: #888">Help</span>
+                            <div class="tooltip" id="graph-help-${sn}" style="font-size: 90%;">
+                                Zoom: click-drag or wheel<br/>
+                                Pan: shift + click-drag</br>
+                                Reset: double-click
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="data-select-details-text-${sn}"  style="min-width: 0; padding-left: 4px">
+                <div class="flex-container-v" style="height:100%;">
+                    <div style="flex: 0 0 20px; font-size: 80%;">
+                        <input type="radio" checked value="logs" name="text_output_what_radio-${sn}" oninput="updateDisplayedLogInterval('${sn}')">Logs
+                        <input type="radio" value="readings" name="text_output_what_radio-${sn}" oninput="updateDisplayedLogInterval('${sn}')">Readings
+                        <input type="radio" value="updates" name="text_output_what_radio-${sn}" oninput="updateDisplayedLogInterval('${sn}')">Updates
+                        <input type="radio" value="raw" name="text_output_what_radio-${sn}" oninput="updateDisplayedLogInterval('${sn}')">Raw
+                        <div style="clear: both; float: right;">
+                            <input type="text" id="text_output_filter_input-${sn}" placeholder="Filter text..."
+                                   style="width: 144px; padding-top: 0; border: #ccc solid 0; border-bottom: #ccc solid 1px"
+                                   oninput="updateDisplayedLogInterval('${sn}')"/>
+                            <input type="radio" checked value="none" name="text_output_time_radio-${sn}" oninput="updateDisplayedLogInterval('${sn}')">No time
+                            <input type="radio" value="epochms" name="text_output_time_radio-${sn}" oninput="updateDisplayedLogInterval('${sn}')">Epoch
+                            <input type="radio" value="datetime" name="text_output_time_radio-${sn}" oninput="updateDisplayedLogInterval('${sn}')">Date
+                            <input type="radio" value="time" name="text_output_time_radio-${sn}" oninput="updateDisplayedLogInterval('${sn}')">Time
+                        </div>
+                    </div>
+                    <div style="flex: 1; overflow-y: auto;">
+                        <div id="data-select-details-log-container-${sn}" class="log-output" style="height: calc(100% - 0px); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1)">
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+
+        // Preventing loops of callbacks in drawCallback
+        // This trick is from https://github.com/danvk/dygraphs/blob/cf4a09a9048ae6089f67c32c6d9ae55a8458873f/src/extras/synchronizer.js#L155
+        var blockDrawCallback = false;
+        const throttledUpdateDisplayedLogInterval = debounceAndThrottle(function (sn) {
+            updateDisplayedLogInterval(sn);
+        }, 1000, true);
+        var readings_data_plot = new Dygraph(
+            document.getElementById("readings_data_plot-" + sn),
+            [],
+            {
+                connectSeparatedPoints: true,
+                drawCallback: function (g, is_initial) {
+                    if (blockDrawCallback || is_initial) return;
+                    blockDrawCallback = true;
+                    fixValueRangesUpdate(g);
+                    let xAxisRange = g.xAxisRange();
+                    updateSelectedTimelineWindow(xAxisRange);
+                    throttledUpdateDisplayedLogInterval(sn);
+                    blockDrawCallback = false;
+                },
+                dateWindow: timelineGraph.xAxisRange(), // todo: is this good? why?
+                colors: readingsGraphColors,
+                axes: {
+                    x: {
+                        axisLabelFontSize: 12,
+                        ticker: Dygraph.dateTicker,
+                        axisLabelFormatter: Dygraph.dateAxisLabelFormatter,
+                        valueFormatter: function (ms) {
+                            return formatToTimeMs(ms);
+                        },
+                    },
+                    y: {
+                        axisLabelFontSize: 12,
+                        axisLabelWidth: 28,
+                    },
+                    y2: {
+                        axisLabelFontSize: 12,
+                        axisLabelWidth: 36,
+                    }
+                },
+                // animatedZooms: true,
+                drawPoints: true,
+                pointSize: 1.5,
+                highlightSeriesBackgroundAlpha: 1,
+                highlightSeriesOpts: {
+                    strokeWidth: 1.2,
+                    strokeBorderWidth: 1,
+                    highlightCircleSize: 3
+                }
+            }
+        );
+        graphMap['readings_data_plot-' + sn] = {graph: readings_data_plot, data: []};
+
+        // allow zoom out with scroll; todo: always uses center focal point; todo: attach same to timeline chart
+        document.getElementById("readings_data_plot-" + sn).addEventListener('wheel', function (event) {
+            let zoomPercent = 0.15 * event.deltaY / 200;
+            let xAxisRange = readings_data_plot.xAxisRange();
+            let xAxisExtremes = readings_data_plot.xAxisExtremes();
+            let currentXSpan = xAxisRange[1] - xAxisRange[0];
+            xAxisRange[0] -= currentXSpan * zoomPercent;
+            xAxisRange[1] += currentXSpan * zoomPercent;
+            // note: allowing to select up to timeline max time selection; todo: use combined plot range?
+            xAxisRange[0] = Math.max(Math.min(timelineWindowStartEpochMs, xAxisExtremes[0]), xAxisRange[0]);
+            xAxisRange[1] = Math.min(Math.max(xAxisExtremes[1], now), xAxisRange[1]);
+
+            var yAxesRanges = readings_data_plot.yAxisRanges();
+            var yAxisExtremes = readings_data_plot.yAxisExtremes();
+            var newYAxesRanges = [];
+            for (var i = 0; i < yAxesRanges.length; i++) {
+                var range = yAxesRanges[i];
+                var rangeExtremes = yAxisExtremes[i];
+                let currentSpan = range[1] - range[0];
+                range[0] -= currentSpan * zoomPercent;
+                range[1] += currentSpan * zoomPercent;
+                // don't zoom out beyond extremes
+                range[0] = Math.max(rangeExtremes[0], range[0]);
+                range[1] = Math.min(rangeExtremes[1], range[1]);
+                newYAxesRanges[i] = range;
+            }
+
+            var axesOptions = {};
+            axesOptions.y = {valueRange: newYAxesRanges[0]};
+            if (newYAxesRanges.length > 1) {
+                axesOptions.y2 = {valueRange: newYAxesRanges[1]};
+            }
+
+            readings_data_plot.updateOptions({dateWindow: xAxisRange, axes: axesOptions});
+            event.preventDefault();
+        });
+
+        var mysplit = Split(['#data-select-details-plot-' + sn, '#data-select-details-text-' + sn], {
+            sizes: [50, 50],
+            minSize: [160, 160],
+            gutterSize: 5,
+            cursor: 'col-resize',
+            onDrag: function (sizes) {
+                readings_data_plot.resize()
+                /*
+                            if (sizes[0] < 200) {
+                                collapse(0);
+                                // document.getElementById("data-select-details-plot-" + sn).style.display = "none";
+                            }
+                */
+            }
+        })
+
+        let selectReadingsElement = document.getElementById('readings_data_plot_selected_readings-' + sn);
+        selectReadingsElement.selectedIndex = 0;
+        await readingsSelectionChanged(sn);
+        synchronizeAllGraphs();
+        // todo: this is hack, it should be handled by synchronizer, but it isn't when wheel is first action
+        for (const [, entry] of Object.entries(graphMap)) {
+            entry.graph.updateOptions({dateWindow: readings_data_plot.xAxisRange()});
+        }
+
+
+    }
+
+    function collapseConnectionData(sn, timelineGraphKey, divId) {
+        desynchronizeAllGraphs();
+        let gId = 'readings_data_plot-' + sn;
+        delete refreshables[gId];
+        graphMap[gId].graph.destroy();
+        delete graphMap[gId];
+
+        // destroying all elems; todo: check that it actually destroys - i.e. we don't fetch data when browsing timeline and this is hidden
+        let panelDiv = document.getElementById("data-select-details-" + sn);
+        panelDiv.innerHTML = "";
+
+        document.getElementById(divId).style.height = 44;
+        var g = graphMap[timelineGraphKey].graph;
+        g.updateOptions({
+            axes: {x: {drawAxis: false}},
+            showRangeSelector: false
+        })
+        g.resize();
+
+        synchronizeAllGraphs();
+    }
+
+    async function readingsSelectionChanged(sn) {
+        var selectHtmlElement = document.getElementById('readings_data_plot_selected_readings-' + sn);
+        var readings = [];
+        let plotLabels = ["Date"];
+        for (var i = 0; i < selectHtmlElement.options.length; i++) {
+            if (selectHtmlElement.options[i].selected) {
+                let selectedValue = selectHtmlElement.options[i].value;
+                plotLabels.push(selectedValue);
+                readings.push(selectedValue);
+            }
+        }
+
+        var readingsData = getReadingsValues(sn, readings, timelineWindowStartEpochMs, timelineWindowEndEpochMs);
+        let gOptions = {
+            file: readingsData, labels: plotLabels, series: {},
+            // NOTE: also resetting y axis range after new series are added
+            axes: {
+                y: {valueRange: null}
+            }
+        };
+        // use two y-axis when two series selected todo: really??
+        // note: indexes shifted by 1 because first is Date and not series
+        // first restore all to y1
+        for (i = 1; i < plotLabels.length; i++) {
+            gOptions.series[plotLabels[i]] = {axis: 'y1'};
+        }
+        // then only if we have exactly two, pin second to y2
+        if (plotLabels.length === 3) {
+            gOptions.series[plotLabels[2]] = {axis: 'y2'};
+            gOptions.axes.y2 = {valueRange: null};
+        }
+
+        // todo: if more than two axes, then normalize and hide axis value? or even full support multiple axes!
+        // todo: if more than two axes, then pick most outlier and put on second axis?
+
+        let gId = 'readings_data_plot-' + sn;
+        let graphEntry = graphMap[gId];
+        graphEntry.graph.updateOptions(gOptions);
+        graphEntry.data = readingsData;
+        graphEntry.graph.resize();
+
+        refreshables[gId] = {
+            refresh: async function (prevNow, now) {
+                let refreshedData = getReadingsValues(sn, readings, timelineWindowStartEpochMs, now);
+                let gOptions = {file: refreshedData};
+
+                // update visible area of plot,
+                // but only if graph dateWindow was aligned to right (within 30sec accuracy)
+                let axisRange = graphEntry.graph.xAxisRange();
+                if (Math.abs(axisRange[1] - prevNow) < 30 * 1000) {
+                    gOptions.dateWindow = [axisRange[0] + (now - axisRange[1]), now];
+                }
+
+                graphEntry.graph.updateOptions(gOptions);
+                graphEntry.data = refreshedData;
+            }
+        }
+    }
+</script>
+
+</body>
+</html>
