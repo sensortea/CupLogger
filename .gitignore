@@ -1,5 +1,8 @@
 *.DS_Store
 
+# Draw.io
+*.drawio.*.bkp
+
 # Compiled class file
 *.class
 
