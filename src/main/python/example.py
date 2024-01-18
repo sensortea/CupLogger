@@ -1,6 +1,6 @@
 import cuplogger
 
-baseDir = '/tmp/cuplogger'
+baseDir = '/tmp/base_dir'
 serialNumber = '242353135363516111A2'
 startEpochMs = 1705318466234  # Example start time in epoch milliseconds
 endEpochMs = 1705418466234    # Example end time in epoch milliseconds

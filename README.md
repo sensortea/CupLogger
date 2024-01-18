@@ -23,9 +23,9 @@ Download the latest cuplogger-XXX.jar from [downloads](downloads/). It requires 
 
 To start the tool, run:
 ```commandline
-java -jar cuplogger-0.9.jar start /base_dir 8080
+java -jar cuplogger-0.9.jar start /tmp/base_dir 8080
 ```
-Use the name & version of the jar that you downloaded. Replace `/base_dir` with the path to directory where you want to keep the data (it will be created if doesn't already exist). Change `8080` if you want to start web UI on a different port.
+Use the name & version of the jar that you downloaded. Replace `/tmp/base_dir` with the path to directory where you want to keep the data (it will be created if doesn't already exist). Change `8080` if you want to start web UI on a different port.
 
 Once started, open your browser at http://localhost:8080 (use the port number you started it with). Note, that you can [avoid using web UI altogether](#config_control) by editing live connections configuration directly. 
 
@@ -66,7 +66,7 @@ Expand device's details by clicking on "..." and browsing "Raw" captured data (n
 The captured logs can be accessed in the `data` folder in the directory you specified at startup, with each line prefixed by epoch timestamp of when it was received:
 
 ```text
-/base_dir
+base_dir
 ├── application.log
 ├── data
 │   └── 2024_01_15
@@ -81,7 +81,7 @@ The captured logs can be accessed in the `data` folder in the directory you spec
 │                   ...
 └── serialConnections.json
 ```
-(hint: tail it with `tail -f /base_dir/data/*/*/*` command)
+(hint: tail it with `tail -f /tmp/base_dir/data/*/*/*` command)
 
 If you use **Python**, the provided [cuplogger.py](src/main/python/cuplogger.py) has handy methods to find and parse files for the given serial number and time range. See [example.py](src/main/python/example.py). Similarly, there's a helper code to do **Java**, see [ReadDataExample.java](src/main/java/example/ReadDataExample.java).
 
@@ -101,6 +101,7 @@ void loop() {
   delay(1000);
 }
 ```
+(note: you may need to pause capturing data by CupLogger when uploading program via same port using Arduino IDE)
 
 It also tells the program name (`MyProgram`) and program version (`1.0`), along with device config detail (`DHT11` to e.g. indicate the sensor type). The `36` at the end is used as a length-check (poor man's CRC) to help deal with quirks of Serial data transmits. The reading is now interpreted by the UI which can plot it:
 
@@ -141,7 +142,7 @@ NOTE: avoid commas in strings to avoid messing up the log structure.
 
 ### Example: Using lib to print out readings and logs
 
-The provided [CupLogger](src/main/cpp/CupLogger) lib helps to log in proper format. The code would look like this:
+The provided [CupLogger lib](src/main/cpp/CupLogger) ([Arduino library zip](downloads/Arduino)) helps to log in proper format. The code would look like this (some examples [here](src/main/cpp/CupLogger/example)):
 
 ```C++
 #include "CupLogger.h"
@@ -162,7 +163,7 @@ Note this code specifies `millis()` as the source for the on-device time, to be 
 
 The `logEnv("MyProgram,1.0,DHT11", millis);` line can be dropped altogether to use the defaults (empty strings and no time delta tracking). 
 
-It should be easy to extend the [CupLogger](src/main/cpp/CupLogger) lib for your needs, or modify it to a non-Arduino environment (the only Arduino-specific methods using `Serial.print` are conveniently extracted). You can also just copy-paste the small lib code into your program as in [this sketch](src/main/cpp/example/sketch_lib_helpers_copied.ino). Or implement the simple helper functions yourself, as in the next example.
+It should be easy to extend the [CupLogger](src/main/cpp/CupLogger) lib for your needs, or modify it to a non-Arduino environment (the only Arduino-specific methods using `Serial.print` are conveniently extracted). You can also just copy-paste the small lib code into your program as in [this sketch](src/main/cpp/CupLogger/example/sketch_lib_helpers_copied.ino). Or implement the simple helper functions yourself, as in the next example.
 
 ### Example: Custom helper functions to print out readings and logs
 
@@ -218,7 +219,7 @@ To control data capture without web UI you can edit its config file directly or 
 
 ### Config file
 
-Cuplogger tool keeps its live configuration in the `/base_dir` specified at the startup in the `serialConnections.json` file. It can look like this:
+Cuplogger tool keeps its live configuration in the `/tmp/base_dir` specified at the startup in the `serialConnections.json` file. It can look like this:
 
 ```json
 {
