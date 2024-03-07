@@ -134,7 +134,7 @@ As you might've guessed, the data format is CSV-like:
 * `[,<readingName>:<readingValue>[,<readingName>:<readingValue>[...]]` if present, is a list of readings 
   * `readingName` (string) is a reading name
   * `readingValue` (floating point) is a reading value
-* `lengthCheck` (numeric) is length of the line up to (not including) the last comma
+* `lengthCheck` (numeric) is length of the line (in bytes!) up to (not including) the last comma and length
 
 There's a lot of "can be" because it's up to you how you may want to use some of these. You can also skip them altogether (though don't skip the comma ;)). The "reading:value" format plays nicely with standard SerialPlotter, should you use it too.
 
@@ -200,6 +200,8 @@ void loop() {
   delay(1000);
 }
 ```
+
+Also some Python/MicroPython example code can be found in the [discussion here](discussions/1).
 
 # Other usage details
 
