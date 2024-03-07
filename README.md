@@ -201,7 +201,7 @@ void loop() {
 }
 ```
 
-Also some Python/MicroPython example code can be found in the [discussion here](discussions/1).
+Also some Python/MicroPython example code can be found in the [discussion here](https://github.com/sensortea/CupLogger/discussions/1).
 
 # Other usage details
 
